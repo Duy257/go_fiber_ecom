@@ -69,20 +69,6 @@ func (r *OrderRepository) CreateStatusHistory(history *models.OrderStatusHistory
 	return r.db.Create(history).Error
 }
 
-func (r *OrderRepository) CreatePayment(payment *models.Payment) error {
-	return r.db.Create(payment).Error
-}
-
-func (r *OrderRepository) UpdatePayment(payment *models.Payment) error {
-	return r.db.Save(payment).Error
-}
-
-func (r *OrderRepository) FindPaymentByOrderID(orderID uuid.UUID) (*models.Payment, error) {
-	var payment models.Payment
-	err := r.db.Where("order_id = ?", orderID).First(&payment).Error
-	return &payment, err
-}
-
 func (r *OrderRepository) GenerateOrderNumber() string {
 	return fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), uuid.New().String()[:8])
 }
