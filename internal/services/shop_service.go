@@ -22,21 +22,25 @@ func NewShopService(repo *repositories.ShopRepository, userRepo *repositories.Us
 }
 
 type CreateShopInput struct {
-	UserID      string `json:"user_id" validate:"required"`
-	Name        string `json:"name" validate:"required"`
-	Description string `json:"description"`
-	Logo        string `json:"logo"`
-	Address     string `json:"address"`
-	Phone       string `json:"phone"`
+	UserID      string  `json:"user_id" validate:"required"`
+	Name        string  `json:"name" validate:"required"`
+	Description string  `json:"description"`
+	Logo        string  `json:"logo"`
+	Address     string  `json:"address"`
+	Latitude    float64 `json:"latitude" validate:"min=-90,max=90"`
+	Longitude   float64 `json:"longitude" validate:"min=-180,max=180"`
+	Phone       string  `json:"phone"`
 }
 
 type UpdateShopInput struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Logo        *string `json:"logo"`
-	Address     *string `json:"address"`
-	Phone       *string `json:"phone"`
-	Status      *string `json:"status"`
+	Name        *string  `json:"name"`
+	Description *string  `json:"description"`
+	Logo        *string  `json:"logo"`
+	Address     *string  `json:"address"`
+	Latitude    *float64 `json:"latitude" validate:"omitempty,min=-90,max=90"`
+	Longitude   *float64 `json:"longitude" validate:"omitempty,min=-180,max=180"`
+	Phone       *string  `json:"phone"`
+	Status      *string  `json:"status"`
 }
 
 func generateUniqueSlug(slug string, existingCheck func(string) bool) string {
@@ -80,6 +84,8 @@ func (s *ShopService) Create(input CreateShopInput) (*models.Shop, error) {
 		Description: input.Description,
 		Logo:        input.Logo,
 		Address:     input.Address,
+		Latitude:    input.Latitude,
+		Longitude:   input.Longitude,
 		Phone:       input.Phone,
 		Status:      "active",
 	}
@@ -146,6 +152,12 @@ func (s *ShopService) Update(id uuid.UUID, input UpdateShopInput) (*models.Shop,
 	}
 	if input.Address != nil {
 		shop.Address = *input.Address
+	}
+	if input.Latitude != nil {
+		shop.Latitude = *input.Latitude
+	}
+	if input.Longitude != nil {
+		shop.Longitude = *input.Longitude
 	}
 	if input.Phone != nil {
 		shop.Phone = *input.Phone
