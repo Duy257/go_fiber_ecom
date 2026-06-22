@@ -51,6 +51,13 @@ PaymentService mà không cần tạo lại logic payment.
 File: `internal/models/payment.go`
 
 ```go
+const (
+    PaymentStatusPending  = "pending"
+    PaymentStatusPaid     = "paid"
+    PaymentStatusFailed   = "failed"
+    PaymentStatusRefunded = "refunded"
+)
+
 type Payment struct {
     ID            uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
     Type          string         `gorm:"type:varchar(50);not null;default:order" json:"type"`
@@ -98,6 +105,8 @@ func NewPaymentRepository(db *gorm.DB) *PaymentRepository
 func (r *PaymentRepository) FindByID(id uuid.UUID) (*models.Payment, error)
 func (r *PaymentRepository) FindByOrderID(orderID uuid.UUID) (*models.Payment, error)
 func (r *PaymentRepository) FindAll(filter PaymentFilter) ([]models.Payment, int64, error)
+// - Khi Page < 1 → mặc định 1; Limit < 1 hoặc > 100 → mặc định 10
+// - Filter chỉ áp dụng khi field != "" (zero value) để tránh lọc nhầm
 func (r *PaymentRepository) Create(payment *models.Payment) error
 func (r *PaymentRepository) Update(payment *models.Payment) error
 ```
@@ -126,12 +135,23 @@ func NewPaymentService(paymentRepo *repositories.PaymentRepository) *PaymentServ
 // 1. Tạo payment record trong transaction
 func (s *PaymentService) CreatePayment(tx *gorm.DB, input CreatePaymentInput) (*models.Payment, error)
 
-// 2. COD auto-pay khi order delivered
+// 2. Auto-pay COD khi order delivered (chỉ tác động nếu method == "cod" && status == "pending")
 func (s *PaymentService) MarkAsPaid(tx *gorm.DB, orderID uuid.UUID) error
 
 // 3. Cancel payment (failed nếu pending, refunded nếu đã paid)
-func (s *PaymentService) CancelPayment(tx *gorm.DB, orderID uuid.UUID) error
+func (s *PaymentService) CancelPayment(tx *gorm.DB, paymentID uuid.UUID) error
+
+// 4. Helper — tìm payment theo order (dùng bởi OrderService)
+func (s *PaymentService) FindByOrderID(tx *gorm.DB, orderID uuid.UUID) (*models.Payment, error)
 ```
+
+### Validation trong `CreatePayment`
+
+- `Type`: bắt buộc, phải thuộc `["order", "top_up", "membership"]`
+- `OrderID`: **non-nil** khi `Type == "order"`, **nil** khi `Type != "order"` — nếu sai, trả về lỗi
+- `Method`: bắt buộc, phải thuộc `["cod", "bank_transfer", "e_wallet"]`
+- `Amount`: phải `> 0`
+- Trả về `error` cụ thể để caller (OrderService, sau này là TopUpService) xử lý
 
 ## 4. OrderService — thay đổi
 
@@ -140,7 +160,7 @@ File: `internal/services/order_service.go`
 - Inject `PaymentService` vào `OrderService`
 - **Create order:** thay `tx.Create(payment)` bằng `paymentSvc.CreatePayment(tx, ...)`
 - **Update status → delivered:** thay logic tự làm bằng `paymentSvc.MarkAsPaid(tx, order.ID)`
-- **Cancel order:** thay logic tự làm bằng `paymentSvc.CancelPayment(tx, order.ID)`
+- **Cancel order:** `paymentSvc.FindByOrderID(tx, order.ID)` → `paymentSvc.CancelPayment(tx, payment.ID)`
 
 ## 5. Files thay đổi
 
@@ -150,7 +170,7 @@ File: `internal/services/order_service.go`
 | `internal/models/order.go` | **Sửa** — xóa Payment struct, giữ `Payment *Payment` |
 | `internal/repositories/payment_repo.go` | **Tạo mới** — 5 hàm CRUD |
 | `internal/repositories/order_repo.go` | **Sửa** — xóa 3 hàm payment |
-| `internal/services/payment_service.go` | **Tạo mới** — 3 hàm business logic |
+| `internal/services/payment_service.go` | **Tạo mới** — 4 hàm business logic |
 | `internal/services/order_service.go` | **Sửa** — gọi PaymentService |
 | `cmd/server/main.go` | **Sửa** — wiring Payment module |
 
@@ -169,7 +189,6 @@ vào `database.go` trước `AutoMigrate`:
 
 ```go
 // Fix existing payments table
-db.Exec(`ALTER TABLE payments ALTER COLUMN method TYPE varchar(50)`)
 db.Exec(`ALTER TABLE payments ALTER COLUMN order_id DROP NOT NULL`)
 db.Exec(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS type varchar(50) NOT NULL DEFAULT 'order'`)
 ```
