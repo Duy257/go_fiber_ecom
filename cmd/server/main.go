@@ -48,6 +48,10 @@ func main() {
 	userRepo := repositories.NewUserRepository(db)
 	roleRepo := repositories.NewRoleRepository(db)
 	permissionRepo := repositories.NewPermissionRepository(db)
+	categoryRepo := repositories.NewCategoryRepository(db)
+	shopRepo := repositories.NewShopRepository(db)
+	productRepo := repositories.NewProductRepository(db)
+	orderRepo := repositories.NewOrderRepository(db)
 
 	// Services
 	authService := services.NewAuthService(cfg, userRepo, customerRepo)
@@ -55,6 +59,10 @@ func main() {
 	userService := services.NewUserService(userRepo, roleRepo)
 	roleService := services.NewRoleService(roleRepo, permissionRepo)
 	dashboardService := services.NewDashboardService(customerRepo, userRepo, roleRepo)
+	categoryService := services.NewCategoryService(categoryRepo)
+	shopService := services.NewShopService(shopRepo, userRepo)
+	productService := services.NewProductService(productRepo, shopRepo, categoryRepo)
+	orderService := services.NewOrderService(orderRepo, customerRepo, productRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService)
@@ -63,6 +71,10 @@ func main() {
 	roleHandler := handlers.NewRoleHandler(roleService)
 	permissionHandler := handlers.NewPermissionHandler(permissionRepo)
 	dashboardHandler := handlers.NewDashboardHandler(dashboardService)
+	categoryHandler := handlers.NewCategoryHandler(categoryService)
+	shopHandler := handlers.NewShopHandler(shopService)
+	productHandler := handlers.NewProductHandler(productService)
+	orderHandler := handlers.NewOrderHandler(orderService)
 
 	api := app.Group("/api/v1")
 
@@ -116,6 +128,47 @@ func main() {
 	admin.Get("/permissions", middleware.RequirePermission(userRepo, "permission:read"), permissionHandler.GetAll)
 	admin.Post("/permissions", middleware.RequirePermission(userRepo, "permission:write"), permissionHandler.Create)
 
+	// Public routes
+	categories := api.Group("/categories")
+	categories.Get("/", categoryHandler.GetAll)
+	categories.Get("/:id", categoryHandler.GetByID)
+
+	shops := api.Group("/shops")
+	shops.Get("/", shopHandler.GetAll)
+	shops.Get("/:id", shopHandler.GetByID)
+
+	products := api.Group("/products")
+	products.Get("/", productHandler.GetAll)
+	products.Get("/:id", productHandler.GetByID)
+
+	// Customer order routes (customer_id from JWT)
+	customerOrders := api.Group("/customer/orders", middleware.JWTAuth(cfg))
+	customerOrders.Post("/", orderHandler.Create)
+	customerOrders.Get("/", orderHandler.GetMyOrders)
+	customerOrders.Get("/:id", orderHandler.GetByID)
+	customerOrders.Post("/:id/cancel", orderHandler.Cancel)
+
+	// Admin ecommerce routes
+	adminCategories := api.Group("/admin/categories", middleware.JWTAuth(cfg))
+	adminCategories.Post("/", middleware.RequirePermission(userRepo, "category:write"), categoryHandler.Create)
+	adminCategories.Put("/:id", middleware.RequirePermission(userRepo, "category:write"), categoryHandler.Update)
+	adminCategories.Delete("/:id", middleware.RequirePermission(userRepo, "category:delete"), categoryHandler.Delete)
+
+	adminShops := api.Group("/admin/shops", middleware.JWTAuth(cfg))
+	adminShops.Post("/", middleware.RequirePermission(userRepo, "shop:write"), shopHandler.Create)
+	adminShops.Put("/:id", middleware.RequirePermission(userRepo, "shop:write"), shopHandler.Update)
+	adminShops.Delete("/:id", middleware.RequirePermission(userRepo, "shop:delete"), shopHandler.Delete)
+
+	adminProducts := api.Group("/admin/products", middleware.JWTAuth(cfg))
+	adminProducts.Post("/", middleware.RequirePermission(userRepo, "product:write"), productHandler.Create)
+	adminProducts.Put("/:id", middleware.RequirePermission(userRepo, "product:write"), productHandler.Update)
+	adminProducts.Delete("/:id", middleware.RequirePermission(userRepo, "product:delete"), productHandler.Delete)
+
+	adminOrders := api.Group("/admin/orders", middleware.JWTAuth(cfg))
+	adminOrders.Get("/", middleware.RequirePermission(userRepo, "order:read"), orderHandler.GetByShop)
+	adminOrders.Get("/:id", middleware.RequirePermission(userRepo, "order:read"), orderHandler.GetByID)
+	adminOrders.Put("/:id/status", middleware.RequirePermission(userRepo, "order:write"), orderHandler.UpdateStatus)
+
 	log.Printf("Server starting on port %s", cfg.ServerPort)
 	log.Fatal(app.Listen(":" + cfg.ServerPort))
 }
@@ -140,6 +193,17 @@ func seedData(db *gorm.DB, cfg *config.Config) {
 		{Name: "permission:read", Description: "View permissions"},
 		{Name: "permission:write", Description: "Create permissions"},
 		{Name: "dashboard:read", Description: "View dashboard"},
+		{Name: "category:read", Description: "View categories"},
+		{Name: "category:write", Description: "Create/update categories"},
+		{Name: "category:delete", Description: "Delete categories"},
+		{Name: "shop:read", Description: "View shops"},
+		{Name: "shop:write", Description: "Create/update shops"},
+		{Name: "shop:delete", Description: "Delete shops"},
+		{Name: "product:read", Description: "View products"},
+		{Name: "product:write", Description: "Create/update products"},
+		{Name: "product:delete", Description: "Delete products"},
+		{Name: "order:read", Description: "View orders"},
+		{Name: "order:write", Description: "Update order status"},
 	}
 
 	for i := range permissions {

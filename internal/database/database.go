@@ -43,6 +43,16 @@ func Migrate(db *gorm.DB) {
 		&models.Permission{},
 		&models.User{},
 		&models.Customer{},
+		&models.Category{},
+		&models.ProductCategory{},
+		&models.Shop{},
+		&models.Product{},
+		&models.ProductVariant{},
+		&models.ProductImage{},
+		&models.Order{},
+		&models.OrderItem{},
+		&models.OrderStatusHistory{},
+		&models.Payment{},
 	)
 	if err != nil {
 		log.Fatal("Failed to migrate database:", err)

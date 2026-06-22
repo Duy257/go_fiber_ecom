@@ -203,7 +203,7 @@ type ProductVariant struct {
 	ProductID  uuid.UUID      `gorm:"type:uuid;index;not null" json:"product_id"`
 	Product    Product        `gorm:"foreignKey:ProductID" json:"-"`
 	Name       string         `gorm:"type:varchar(255);not null" json:"name"`
-	SKU        string         `gorm:"type:varchar(100);uniqueIndex" json:"sku,omitempty"`
+	SKU        *string        `gorm:"type:varchar(100);uniqueIndex" json:"sku,omitempty"`
 	Price      float64        `gorm:"type:decimal(12,2);not null" json:"price"`
 	Stock      int            `gorm:"not null;default:0" json:"stock"`
 	Attributes map[string]interface{} `gorm:"type:jsonb;serializer:json" json:"attributes,omitempty"`
@@ -417,6 +417,47 @@ git commit -m "feat: add CategoryRepository"
 
 ---
 
+### Task 5b: Slug Utility
+
+**Files:**
+- Create: `internal/utils/slug.go`
+
+- [ ] **Step 1: Tạo slug utility**
+
+```go
+// internal/utils/slug.go
+package utils
+
+import (
+	"regexp"
+	"strings"
+)
+
+var nonAlphanumericRegex = regexp.MustCompile(`[^a-z0-9-]`)
+var multiHyphenRegex = regexp.MustCompile(`-{2,}`)
+
+func GenerateSlug(name string) string {
+	slug := strings.ToLower(strings.TrimSpace(name))
+	slug = strings.ReplaceAll(slug, " ", "-")
+	slug = nonAlphanumericRegex.ReplaceAllString(slug, "")
+	slug = multiHyphenRegex.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		return "untitled"
+	}
+	return slug
+}
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add internal/utils/slug.go
+git commit -m "feat: add GenerateSlug utility"
+```
+
+---
+
 ### Task 6: Category Service
 
 **Files:**
@@ -431,10 +472,10 @@ package services
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"go-fiber/internal/models"
 	"go-fiber/internal/repositories"
+	"go-fiber/internal/utils"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -465,15 +506,8 @@ type UpdateCategoryInput struct {
 	Status      *string `json:"status"`
 }
 
-func generateSlug(name string) string {
-	slug := strings.ToLower(strings.TrimSpace(name))
-	slug = strings.ReplaceAll(slug, " ", "-")
-	slug = strings.ReplaceAll(slug, "--", "-")
-	return slug
-}
-
 func (s *CategoryService) Create(input CreateCategoryInput) (*models.Category, error) {
-	slug := generateSlug(input.Name)
+	slug := utils.GenerateSlug(input.Name)
 
 	_, err := s.repo.FindBySlug(slug)
 	if err == nil {
@@ -552,7 +586,7 @@ func (s *CategoryService) Update(id uuid.UUID, input UpdateCategoryInput) (*mode
 
 	if input.Name != nil {
 		category.Name = *input.Name
-		category.Slug = generateSlug(*input.Name)
+		category.Slug = utils.GenerateSlug(*input.Name)
 	}
 	if input.Description != nil {
 		category.Description = *input.Description
@@ -576,6 +610,14 @@ func (s *CategoryService) Update(id uuid.UUID, input UpdateCategoryInput) (*mode
 			}
 			if parentID == id {
 				return nil, errors.New("category cannot be its own parent")
+			}
+			// Validate nesting depth (max 2 levels)
+			parent, err := s.repo.FindByID(parentID)
+			if err != nil {
+				return nil, errors.New("parent category not found")
+			}
+			if parent.ParentID != nil {
+				return nil, errors.New("cannot nest more than 2 levels")
 			}
 			category.ParentID = &parentID
 		}
@@ -842,10 +884,11 @@ package services
 
 import (
 	"errors"
-	"strings"
+	"fmt"
 
 	"go-fiber/internal/models"
 	"go-fiber/internal/repositories"
+	"go-fiber/internal/utils"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -878,6 +921,19 @@ type UpdateShopInput struct {
 	Status      *string `json:"status"`
 }
 
+func generateUniqueSlug(slug string, existingCheck func(string) bool) string {
+	if !existingCheck(slug) {
+		return slug
+	}
+	for i := 1; i <= 100; i++ {
+		candidate := fmt.Sprintf("%s-%d", slug, i)
+		if !existingCheck(candidate) {
+			return candidate
+		}
+	}
+	return fmt.Sprintf("%s-%d", slug, 101)
+}
+
 func (s *ShopService) Create(input CreateShopInput) (*models.Shop, error) {
 	userID, err := uuid.Parse(input.UserID)
 	if err != nil {
@@ -894,8 +950,10 @@ func (s *ShopService) Create(input CreateShopInput) (*models.Shop, error) {
 		return nil, errors.New("user already has a shop")
 	}
 
-	slug := strings.ToLower(strings.TrimSpace(input.Name))
-	slug = strings.ReplaceAll(slug, " ", "-")
+	slug := generateUniqueSlug(utils.GenerateSlug(input.Name), func(s string) bool {
+		_, err := s.repo.FindBySlug(s)
+		return err == nil
+	})
 
 	shop := &models.Shop{
 		UserID:      userID,
@@ -957,7 +1015,10 @@ func (s *ShopService) Update(id uuid.UUID, input UpdateShopInput) (*models.Shop,
 
 	if input.Name != nil {
 		shop.Name = *input.Name
-		shop.Slug = strings.ToLower(strings.ReplaceAll(*input.Name, " ", "-"))
+		shop.Slug = generateUniqueSlug(utils.GenerateSlug(*input.Name), func(s string) bool {
+			_, err := s.repo.FindBySlug(s)
+			return err == nil
+		})
 	}
 	if input.Description != nil {
 		shop.Description = *input.Description
@@ -1222,22 +1283,24 @@ package services
 
 import (
 	"errors"
-	"strings"
+	"fmt"
 
 	"go-fiber/internal/models"
 	"go-fiber/internal/repositories"
+	"go-fiber/internal/utils"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type ProductService struct {
-	repo     *repositories.ProductRepository
-	shopRepo *repositories.ShopRepository
+	repo          *repositories.ProductRepository
+	shopRepo      *repositories.ShopRepository
+	categoryRepo  *repositories.CategoryRepository
 }
 
-func NewProductService(repo *repositories.ProductRepository, shopRepo *repositories.ShopRepository) *ProductService {
-	return &ProductService{repo: repo, shopRepo: shopRepo}
+func NewProductService(repo *repositories.ProductRepository, shopRepo *repositories.ShopRepository, categoryRepo *repositories.CategoryRepository) *ProductService {
+	return &ProductService{repo: repo, shopRepo: shopRepo, categoryRepo: categoryRepo}
 }
 
 type CreateProductInput struct {
@@ -1252,7 +1315,7 @@ type CreateProductInput struct {
 
 type CreateVariantInput struct {
 	Name       string                 `json:"name" validate:"required"`
-	SKU        string                 `json:"sku"`
+	SKU        *string                `json:"sku"`
 	Price      float64                `json:"price" validate:"required,gt=0"`
 	Stock      int                    `json:"stock" validate:"min=0"`
 	Attributes map[string]interface{} `json:"attributes"`
@@ -1282,8 +1345,21 @@ func (s *ProductService) Create(input CreateProductInput) (*models.Product, erro
 		return nil, errors.New("shop not found")
 	}
 
-	slug := strings.ToLower(strings.TrimSpace(input.Name))
-	slug = strings.ReplaceAll(slug, " ", "-")
+	// Validate category IDs exist
+	if len(input.CategoryIDs) > 0 {
+		for _, catIDStr := range input.CategoryIDs {
+			catID, err := uuid.Parse(catIDStr)
+			if err != nil {
+				return nil, errors.New("invalid category_id")
+			}
+			_, err = s.categoryRepo.FindByID(catID)
+			if err != nil {
+				return nil, fmt.Errorf("category %s not found", catIDStr)
+			}
+		}
+	}
+
+	slug := utils.GenerateSlug(input.Name)
 
 	product := &models.Product{
 		ShopID:      shopID,
@@ -1376,9 +1452,23 @@ func (s *ProductService) Update(id uuid.UUID, input UpdateProductInput) (*models
 		return nil, err
 	}
 
+	// Validate category IDs exist
+	if input.CategoryIDs != nil && len(input.CategoryIDs) > 0 {
+		for _, catIDStr := range input.CategoryIDs {
+			catID, err := uuid.Parse(catIDStr)
+			if err != nil {
+				return nil, errors.New("invalid category_id")
+			}
+			_, err = s.categoryRepo.FindByID(catID)
+			if err != nil {
+				return nil, fmt.Errorf("category %s not found", catIDStr)
+			}
+		}
+	}
+
 	if input.Name != nil {
 		product.Name = *input.Name
-		product.Slug = strings.ToLower(strings.ReplaceAll(*input.Name, " ", "-"))
+		product.Slug = utils.GenerateSlug(*input.Name)
 	}
 	if input.Description != nil {
 		product.Description = *input.Description
@@ -1539,7 +1629,7 @@ func (h *ProductHandler) Delete(c *fiber.Ctx) error {
 ```go
 // cmd/server/main.go
 productRepo := repositories.NewProductRepository(db)
-productService := services.NewProductService(productRepo, shopRepo)
+productService := services.NewProductService(productRepo, shopRepo, categoryRepo)
 productHandler := handlers.NewProductHandler(productService)
 
 // Public
@@ -1666,10 +1756,11 @@ func (r *OrderRepository) FindPaymentByOrderID(orderID uuid.UUID) (*models.Payme
 }
 
 func (r *OrderRepository) GenerateOrderNumber() string {
-	now := time.Now()
-	count := int64(0)
-	r.db.Model(&models.Order{}).Where("DATE(created_at) = CURRENT_DATE").Count(&count)
-	return fmt.Sprintf("ORD-%s-%04d", now.Format("20060102"), count+1)
+	return fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), uuid.New().String()[:8])
+}
+
+func (r *OrderRepository) Transaction(fn func(tx *gorm.DB) error) error {
+	return r.db.Transaction(fn)
 }
 ```
 
@@ -1813,40 +1904,49 @@ func (s *OrderService) Create(input CreateOrderInput) (*models.Order, error) {
 	order.SubTotal = subTotal
 	order.TotalAmount = subTotal + input.ShippingFee
 
-	if err := s.repo.Create(order); err != nil {
-		return nil, err
-	}
+	// Wrapped in DB transaction for atomicity
+	err = s.repo.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
 
-	// Trừ stock
-	for _, item := range order.Items {
-		if item.VariantID != nil {
-			if err := s.productRepo.UpdateStock(*item.VariantID, item.Quantity); err != nil {
-				return nil, err
+		// Deduct stock within same transaction
+		for _, item := range order.Items {
+			if item.VariantID != nil {
+				if err := tx.Model(&models.ProductVariant{}).Where("id = ?", *item.VariantID).
+					Update("stock", gorm.Expr("stock - ?", item.Quantity)).Error; err != nil {
+					return err
+				}
 			}
 		}
-	}
 
-	// Tạo payment
-	payment := &models.Payment{
-		OrderID: order.ID,
-		Method:  input.PaymentMethod,
-		Status:  "pending",
-		Amount:  order.TotalAmount,
-	}
-	if err := s.repo.CreatePayment(payment); err != nil {
+		// Create payment
+		payment := &models.Payment{
+			OrderID: order.ID,
+			Method:  input.PaymentMethod,
+			Status:  "pending",
+			Amount:  order.TotalAmount,
+		}
+		if err := tx.Create(payment).Error; err != nil {
+			return err
+		}
+
+		// Create status history
+		history := &models.OrderStatusHistory{
+			OrderID: order.ID,
+			Status:  "pending",
+			Note:    "Order created",
+		}
+		if err := tx.Create(history).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
-
-	// Tạo status history
-	history := &models.OrderStatusHistory{
-		OrderID: order.ID,
-		Status:  "pending",
-		Note:    "Order created",
-	}
-	if err := s.repo.CreateStatusHistory(history); err != nil {
-		return nil, err
-	}
-
 	return order, nil
 }
 
@@ -1913,33 +2013,45 @@ func (s *OrderService) UpdateStatus(id uuid.UUID, input UpdateOrderStatusInput) 
 		return nil, errors.New("invalid status transition")
 	}
 
-	order.Status = input.Status
-	if err := s.repo.Update(order); err != nil {
-		return nil, err
-	}
-
-	// Ghi status history
-	history := &models.OrderStatusHistory{
-		OrderID: order.ID,
-		Status:  input.Status,
-		Note:    input.Note,
-	}
-	if err := s.repo.CreateStatusHistory(history); err != nil {
-		return nil, err
-	}
-
-	// Xử lý payment khi delivered (COD)
-	if input.Status == "delivered" {
-		payment, err := s.repo.FindPaymentByOrderID(order.ID)
-		if err == nil && payment.Method == "cod" && payment.Status == "pending" {
-			payment.Status = "paid"
-			now := time.Now()
-			payment.PaidAt = &now
-			s.repo.UpdatePayment(payment)
+	err = s.repo.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Order{}).Where("id = ?", order.ID).Update("status", input.Status).Error; err != nil {
+			return err
 		}
+
+		// Ghi status history
+		history := &models.OrderStatusHistory{
+			OrderID: order.ID,
+			Status:  input.Status,
+			Note:    input.Note,
+		}
+		if err := tx.Create(history).Error; err != nil {
+			return err
+		}
+
+		// Xử lý payment khi delivered (COD)
+		if input.Status == "delivered" {
+			var payment models.Payment
+			if err := tx.Where("order_id = ?", order.ID).First(&payment).Error; err == nil {
+				if payment.Method == "cod" && payment.Status == "pending" {
+					now := time.Now()
+					if err := tx.Model(&payment).Updates(map[string]interface{}{
+						"status": "paid",
+						"paid_at": &now,
+					}).Error; err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
-	return order, nil
+	return s.repo.FindByID(order.ID)
 }
 
 func (s *OrderService) Cancel(id uuid.UUID, note string) (*models.Order, error) {
@@ -1955,38 +2067,52 @@ func (s *OrderService) Cancel(id uuid.UUID, note string) (*models.Order, error) 
 		return nil, errors.New("only pending or confirmed orders can be cancelled")
 	}
 
-	order.Status = "cancelled"
-	if err := s.repo.Update(order); err != nil {
+	err = s.repo.Transaction(func(tx *gorm.DB) error {
+		// Update order status
+		if err := tx.Model(&models.Order{}).Where("id = ?", order.ID).Update("status", "cancelled").Error; err != nil {
+			return err
+		}
+
+		// Restore stock within same transaction
+		for _, item := range order.Items {
+			if item.VariantID != nil {
+				if err := tx.Model(&models.ProductVariant{}).Where("id = ?", *item.VariantID).
+					Update("stock", gorm.Expr("stock + ?", item.Quantity)).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		// Update payment
+		var payment models.Payment
+		if err := tx.Where("order_id = ?", order.ID).First(&payment).Error; err == nil {
+			newStatus := "failed"
+			if payment.Status == "paid" {
+				newStatus = "refunded"
+			}
+			if err := tx.Model(&payment).Update("status", newStatus).Error; err != nil {
+				return err
+			}
+		}
+
+		// Create status history
+		history := &models.OrderStatusHistory{
+			OrderID: order.ID,
+			Status:  "cancelled",
+			Note:    note,
+		}
+		if err := tx.Create(history).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
 
-	// Hoàn stock
-	for _, item := range order.Items {
-		if item.VariantID != nil {
-			s.productRepo.RestoreStock(*item.VariantID, item.Quantity)
-		}
-	}
-
-	// Cập nhật payment
-	payment, err := s.repo.FindPaymentByOrderID(order.ID)
-	if err == nil {
-		if payment.Status == "paid" {
-			payment.Status = "refunded"
-		} else {
-			payment.Status = "failed"
-		}
-		s.repo.UpdatePayment(payment)
-	}
-
-	// Ghi status history
-	history := &models.OrderStatusHistory{
-		OrderID: order.ID,
-		Status:  "cancelled",
-		Note:    note,
-	}
-	s.repo.CreateStatusHistory(history)
-
-	return order, nil
+	return s.repo.FindByID(order.ID)
 }
 ```
 
@@ -2014,11 +2140,23 @@ func NewOrderHandler(service *services.OrderService) *OrderHandler {
 	return &OrderHandler{service: service}
 }
 
+type CancelOrderInput struct {
+	Note string `json:"note"`
+}
+
 func (h *OrderHandler) Create(c *fiber.Ctx) error {
+	// Customer ID comes from JWT claims
+	userID, ok := c.Locals("userID").(string)
+	if !ok {
+		return utils.Error(c, 401, "UNAUTHORIZED", "User not authenticated")
+	}
+
 	var input services.CreateOrderInput
 	if err := c.BodyParser(&input); err != nil {
 		return utils.Error(c, 400, "VALIDATION_ERROR", "Invalid request body")
 	}
+
+	input.CustomerID = userID
 
 	if errs := utils.Validate(input); errs != nil {
 		return utils.Error(c, 400, "VALIDATION_ERROR", errs)
@@ -2046,10 +2184,15 @@ func (h *OrderHandler) GetByID(c *fiber.Ctx) error {
 	return utils.Success(c, order, "")
 }
 
-func (h *OrderHandler) GetByCustomer(c *fiber.Ctx) error {
-	customerID, err := uuid.Parse(c.Params("customer_id"))
+func (h *OrderHandler) GetMyOrders(c *fiber.Ctx) error {
+	userID, ok := c.Locals("userID").(string)
+	if !ok {
+		return utils.Error(c, 401, "UNAUTHORIZED", "User not authenticated")
+	}
+
+	customerID, err := uuid.Parse(userID)
 	if err != nil {
-		return utils.Error(c, 400, "VALIDATION_ERROR", "Invalid customer ID")
+		return utils.Error(c, 401, "UNAUTHORIZED", "Invalid user ID in token")
 	}
 
 	page, _ := strconv.Atoi(c.Query("page", "1"))
@@ -2115,9 +2258,15 @@ func (h *OrderHandler) Cancel(c *fiber.Ctx) error {
 		return utils.Error(c, 400, "VALIDATION_ERROR", "Invalid ID")
 	}
 
-	note := c.Query("note", "Cancelled")
+	var input CancelOrderInput
+	if err := c.BodyParser(&input); err != nil {
+		input.Note = "Cancelled"
+	}
+	if input.Note == "" {
+		input.Note = "Cancelled"
+	}
 
-	order, err := h.service.Cancel(id, note)
+	order, err := h.service.Cancel(id, input.Note)
 	if err != nil {
 		return utils.Error(c, 400, "VALIDATION_ERROR", err.Error())
 	}
@@ -2134,10 +2283,10 @@ orderRepo := repositories.NewOrderRepository(db)
 orderService := services.NewOrderService(orderRepo, customerRepo, productRepo)
 orderHandler := handlers.NewOrderHandler(orderService)
 
-// Customer routes
+// Customer routes (customer_id derived from JWT, not URL)
 customerOrders := api.Group("/customer/orders", middleware.JWTAuth(cfg))
 customerOrders.Post("/", orderHandler.Create)
-customerOrders.Get("/", orderHandler.GetByCustomer)
+customerOrders.Get("/", orderHandler.GetMyOrders)
 customerOrders.Get("/:id", orderHandler.GetByID)
 customerOrders.Post("/:id/cancel", orderHandler.Cancel)
 
