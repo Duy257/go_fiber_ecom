@@ -3,7 +3,6 @@ package services
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"go-fiber/internal/models"
 	"go-fiber/internal/repositories"
@@ -14,17 +13,20 @@ import (
 
 type OrderService struct {
 	repo         *repositories.OrderRepository
+	paymentSvc   *PaymentService
 	customerRepo *repositories.CustomerRepository
 	productRepo  *repositories.ProductRepository
 }
 
 func NewOrderService(
 	repo *repositories.OrderRepository,
+	paymentSvc *PaymentService,
 	customerRepo *repositories.CustomerRepository,
 	productRepo *repositories.ProductRepository,
 ) *OrderService {
 	return &OrderService{
 		repo:         repo,
+		paymentSvc:   paymentSvc,
 		customerRepo: customerRepo,
 		productRepo:  productRepo,
 	}
@@ -151,13 +153,13 @@ func (s *OrderService) Create(input CreateOrderInput) (*models.Order, error) {
 		}
 
 		orderID := order.ID
-		payment := &models.Payment{
-			OrderID: &orderID,
+		_, err = s.paymentSvc.CreatePayment(tx, CreatePaymentInput{
+			Type:    "order",
 			Method:  input.PaymentMethod,
-			Status:  "pending",
 			Amount:  order.TotalAmount,
-		}
-		if err := tx.Create(payment).Error; err != nil {
+			OrderID: &orderID,
+		})
+		if err != nil {
 			return err
 		}
 
@@ -256,17 +258,8 @@ func (s *OrderService) UpdateStatus(id uuid.UUID, input UpdateOrderStatusInput) 
 		}
 
 		if input.Status == "delivered" {
-			var payment models.Payment
-			if err := tx.Where("order_id = ?", order.ID).First(&payment).Error; err == nil {
-				if payment.Method == "cod" && payment.Status == "pending" {
-					now := time.Now()
-					if err := tx.Model(&payment).Updates(map[string]interface{}{
-						"status":  "paid",
-						"paid_at": &now,
-					}).Error; err != nil {
-						return err
-					}
-				}
+			if err := s.paymentSvc.MarkAsPaid(tx, order.ID); err != nil {
+				return err
 			}
 		}
 
@@ -307,13 +300,9 @@ func (s *OrderService) Cancel(id uuid.UUID, note string) (*models.Order, error) 
 			}
 		}
 
-		var payment models.Payment
-		if err := tx.Where("order_id = ?", order.ID).First(&payment).Error; err == nil {
-			newStatus := "failed"
-			if payment.Status == "paid" {
-				newStatus = "refunded"
-			}
-			if err := tx.Model(&payment).Update("status", newStatus).Error; err != nil {
+		payment, err := s.paymentSvc.FindByOrderID(tx, order.ID)
+		if err == nil {
+			if err := s.paymentSvc.CancelPayment(tx, payment.ID); err != nil {
 				return err
 			}
 		}
