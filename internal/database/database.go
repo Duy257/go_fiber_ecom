@@ -56,6 +56,7 @@ func Migrate(db *gorm.DB) {
 		&models.OrderItem{},
 		&models.OrderStatusHistory{},
 		&models.Payment{},
+		&models.ShippingConfig{},
 	)
 	if err != nil {
 		log.Fatal("Failed to migrate database:", err)

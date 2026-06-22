@@ -79,6 +79,7 @@ func main() {
 	shopHandler := handlers.NewShopHandler(shopService)
 	productHandler := handlers.NewProductHandler(productService)
 	orderHandler := handlers.NewOrderHandler(orderService)
+	shippingHandler := handlers.NewShippingHandler(shippingSvc)
 
 	api := app.Group("/api/v1")
 
@@ -140,6 +141,13 @@ func main() {
 	shops := api.Group("/shops")
 	shops.Get("/", shopHandler.GetAll)
 	shops.Get("/:id", shopHandler.GetByID)
+
+	shipping := api.Group("/shipping")
+	shipping.Post("/estimate", shippingHandler.Estimate)
+
+	adminShipping := api.Group("/admin/shipping-config", middleware.JWTAuth(cfg))
+	adminShipping.Get("/", middleware.RequirePermission(userRepo, "shipping_config:read"), shippingHandler.GetConfig)
+	adminShipping.Put("/", middleware.RequirePermission(userRepo, "shipping_config:write"), shippingHandler.UpdateConfig)
 
 	products := api.Group("/products")
 	products.Get("/", productHandler.GetAll)
@@ -208,6 +216,8 @@ func seedData(db *gorm.DB, cfg *config.Config) {
 		{Name: "product:delete", Description: "Delete products"},
 		{Name: "order:read", Description: "View orders"},
 		{Name: "order:write", Description: "Update order status"},
+		{Name: "shipping_config:read", Description: "View shipping config"},
+		{Name: "shipping_config:write", Description: "Update shipping config"},
 	}
 
 	for i := range permissions {
@@ -259,6 +269,16 @@ func seedData(db *gorm.DB, cfg *config.Config) {
 		adminUser.PhoneNumber = &cfg.AdminPhone
 	}
 	db.Create(&adminUser)
+
+	var shippingConfigCount int64
+	db.Model(&models.ShippingConfig{}).Count(&shippingConfigCount)
+	if shippingConfigCount == 0 {
+		db.Create(&models.ShippingConfig{
+			BaseFee:       10000,
+			PerKmRate:     3000,
+			MaxDistanceKm: 30,
+		})
+	}
 
 	log.Println("Seed data created successfully")
 }
