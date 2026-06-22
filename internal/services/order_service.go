@@ -16,6 +16,7 @@ type OrderService struct {
 	paymentSvc   *PaymentService
 	customerRepo *repositories.CustomerRepository
 	productRepo  *repositories.ProductRepository
+	shippingSvc  *ShippingService
 }
 
 func NewOrderService(
@@ -23,23 +24,27 @@ func NewOrderService(
 	paymentSvc *PaymentService,
 	customerRepo *repositories.CustomerRepository,
 	productRepo *repositories.ProductRepository,
+	shippingSvc *ShippingService,
 ) *OrderService {
 	return &OrderService{
 		repo:         repo,
 		paymentSvc:   paymentSvc,
 		customerRepo: customerRepo,
 		productRepo:  productRepo,
+		shippingSvc:  shippingSvc,
 	}
 }
 
 type CreateOrderInput struct {
-	CustomerID      string                 `json:"customer_id" validate:"required"`
-	ShopID          string                 `json:"shop_id" validate:"required"`
-	Items           []CreateOrderItemInput `json:"items" validate:"required,min=1"`
-	ShippingFee     float64                `json:"shipping_fee"`
-	ShippingAddress map[string]interface{} `json:"shipping_address" validate:"required"`
-	Note            string                 `json:"note"`
-	PaymentMethod   string                 `json:"payment_method" validate:"required,oneof=cod bank_transfer e_wallet"`
+	CustomerID        string                 `json:"customer_id" validate:"required"`
+	ShopID            string                 `json:"shop_id" validate:"required"`
+	Items             []CreateOrderItemInput `json:"items" validate:"required,min=1"`
+	ShippingFee       *float64               `json:"shipping_fee"`
+	ShippingAddress   map[string]interface{} `json:"shipping_address" validate:"required"`
+	ShippingLatitude  float64                `json:"shipping_latitude" validate:"required,min=-90,max=90"`
+	ShippingLongitude float64                `json:"shipping_longitude" validate:"required,min=-180,max=180"`
+	Note              string                 `json:"note"`
+	PaymentMethod     string                 `json:"payment_method" validate:"required,oneof=cod bank_transfer e_wallet"`
 }
 
 type CreateOrderItemInput struct {
@@ -69,16 +74,33 @@ func (s *OrderService) Create(input CreateOrderInput) (*models.Order, error) {
 		return nil, errors.New("invalid shop_id")
 	}
 
+	// Calculate shipping fee
+	shippingResult, err := s.shippingSvc.Calculate(shopID, input.ShippingLatitude, input.ShippingLongitude)
+	if err != nil {
+		return nil, err
+	}
+
+	finalShippingFee := shippingResult.TotalFee
+	if input.ShippingFee != nil {
+		if *input.ShippingFee < finalShippingFee {
+			return nil, errors.New("SHIPPING_FEE_OVERRIDE_TOO_LOW")
+		}
+		finalShippingFee = *input.ShippingFee
+	}
+
 	orderNumber := s.repo.GenerateOrderNumber()
 
 	order := &models.Order{
-		CustomerID:      customerID,
-		ShopID:          shopID,
-		OrderNumber:     orderNumber,
-		Status:          "pending",
-		ShippingFee:     input.ShippingFee,
-		ShippingAddress: input.ShippingAddress,
-		Note:            input.Note,
+		CustomerID:         customerID,
+		ShopID:             shopID,
+		OrderNumber:        orderNumber,
+		Status:             "pending",
+		ShippingFee:        finalShippingFee,
+		ShippingAddress:    input.ShippingAddress,
+		ShippingLatitude:   input.ShippingLatitude,
+		ShippingLongitude:  input.ShippingLongitude,
+		ShippingDistanceKm: shippingResult.DistanceKm,
+		Note:               input.Note,
 	}
 
 	var subTotal float64
@@ -131,7 +153,7 @@ func (s *OrderService) Create(input CreateOrderInput) (*models.Order, error) {
 	}
 
 	order.SubTotal = subTotal
-	order.TotalAmount = subTotal + input.ShippingFee
+	order.TotalAmount = subTotal + finalShippingFee
 
 	err = s.repo.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(order).Error; err != nil {

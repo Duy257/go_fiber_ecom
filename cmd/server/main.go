@@ -53,6 +53,7 @@ func main() {
 	productRepo := repositories.NewProductRepository(db)
 	orderRepo := repositories.NewOrderRepository(db)
 	paymentRepo := repositories.NewPaymentRepository(db)
+	shippingConfigRepo := repositories.NewShippingConfigRepository(db)
 
 	// Services
 	authService := services.NewAuthService(cfg, userRepo, customerRepo)
@@ -64,7 +65,8 @@ func main() {
 	shopService := services.NewShopService(shopRepo, userRepo)
 	productService := services.NewProductService(productRepo, shopRepo, categoryRepo)
 	paymentSvc := services.NewPaymentService(paymentRepo)
-	orderService := services.NewOrderService(orderRepo, paymentSvc, customerRepo, productRepo)
+	shippingSvc := services.NewShippingService(shippingConfigRepo, shopRepo)
+	orderService := services.NewOrderService(orderRepo, paymentSvc, customerRepo, productRepo, shippingSvc)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService)
