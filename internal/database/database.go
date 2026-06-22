@@ -38,6 +38,9 @@ func Connect(cfg *config.Config) *gorm.DB {
 }
 
 func Migrate(db *gorm.DB) {
+	db.Exec(`ALTER TABLE payments ALTER COLUMN order_id DROP NOT NULL`)
+	db.Exec(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS type varchar(50) NOT NULL DEFAULT 'order'`)
+
 	err := db.AutoMigrate(
 		&models.Role{},
 		&models.Permission{},
