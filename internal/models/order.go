@@ -18,7 +18,10 @@ type Order struct {
 	SubTotal        float64        `gorm:"type:decimal(12,2);not null" json:"sub_total"`
 	ShippingFee     float64        `gorm:"type:decimal(12,2);default:0" json:"shipping_fee"`
 	TotalAmount     float64        `gorm:"type:decimal(12,2);not null" json:"total_amount"`
-	ShippingAddress map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"shipping_address"`
+	ShippingAddress   map[string]interface{} `gorm:"type:jsonb;serializer:json;not null" json:"shipping_address"`
+	ShippingLatitude   float64                `gorm:"type:decimal(10,7)" json:"shipping_latitude,omitempty"`
+	ShippingLongitude  float64                `gorm:"type:decimal(10,7)" json:"shipping_longitude,omitempty"`
+	ShippingDistanceKm float64                `gorm:"type:decimal(8,2)" json:"shipping_distance_km,omitempty"`
 	Note            string         `gorm:"type:text" json:"note,omitempty"`
 	Items           []OrderItem    `gorm:"foreignKey:OrderID" json:"items,omitempty"`
 	StatusHistory   []OrderStatusHistory `gorm:"foreignKey:OrderID" json:"status_history,omitempty"`

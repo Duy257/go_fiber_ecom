@@ -16,6 +16,8 @@ type Shop struct {
 	Description string         `gorm:"type:text" json:"description,omitempty"`
 	Logo        string         `gorm:"type:varchar(500)" json:"logo,omitempty"`
 	Address     string         `gorm:"type:varchar(500)" json:"address,omitempty"`
+	Latitude    float64        `gorm:"type:decimal(10,7)" json:"latitude,omitempty"`
+	Longitude   float64        `gorm:"type:decimal(10,7)" json:"longitude,omitempty"`
 	Phone       string         `gorm:"type:varchar(20)" json:"phone,omitempty"`
 	Status      string         `gorm:"type:varchar(20);default:active" json:"status"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
