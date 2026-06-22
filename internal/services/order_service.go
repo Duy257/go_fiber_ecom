@@ -150,8 +150,9 @@ func (s *OrderService) Create(input CreateOrderInput) (*models.Order, error) {
 			}
 		}
 
+		orderID := order.ID
 		payment := &models.Payment{
-			OrderID: order.ID,
+			OrderID: &orderID,
 			Method:  input.PaymentMethod,
 			Status:  "pending",
 			Amount:  order.TotalAmount,

@@ -51,16 +51,4 @@ type OrderStatusHistory struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type Payment struct {
-	ID            uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	OrderID       uuid.UUID      `gorm:"type:uuid;uniqueIndex;not null" json:"order_id"`
-	Order         Order          `gorm:"foreignKey:OrderID" json:"-"`
-	Method        string         `gorm:"type:varchar(50);not null" json:"method"`
-	Status        string         `gorm:"type:varchar(20);default:pending" json:"status"`
-	Amount        float64        `gorm:"type:decimal(12,2);not null" json:"amount"`
-	TransactionID string         `gorm:"type:varchar(255)" json:"transaction_id,omitempty"`
-	PaidAt        *time.Time     `json:"paid_at,omitempty"`
-	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-}
+
