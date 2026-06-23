@@ -73,6 +73,24 @@ func (r *OrderRepository) GenerateOrderNumber() string {
 	return fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), uuid.New().String()[:8])
 }
 
+func (r *OrderRepository) FindAutoCompletableDelivered(cutoff time.Time) ([]models.Order, error) {
+	var orders []models.Order
+	err := r.db.
+		Where("status = ?", models.OrderStatusDelivered).
+		Where("delivered_at IS NOT NULL AND delivered_at <= ?", cutoff).
+		Where("has_complaint = ?", false).
+		Order("delivered_at ASC").
+		Find(&orders).Error
+	return orders, err
+}
+
+func (r *OrderRepository) CompleteDeliveredOrder(tx *gorm.DB, orderID uuid.UUID) (int64, error) {
+	result := tx.Model(&models.Order{}).
+		Where("id = ? AND status = ?", orderID, models.OrderStatusDelivered).
+		Update("status", models.OrderStatusCompleted)
+	return result.RowsAffected, result.Error
+}
+
 func (r *OrderRepository) Transaction(fn func(tx *gorm.DB) error) error {
 	return r.db.Transaction(fn)
 }
