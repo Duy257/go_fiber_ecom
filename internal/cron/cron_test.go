@@ -1,4 +1,4 @@
-package main
+package cron
 
 import (
 	"testing"
@@ -19,14 +19,15 @@ func TestOrderCompletionCronSpecRunsAtTwoAM(t *testing.T) {
 	}
 }
 
-func TestStartOrderCompletionCronRegistersOneJob(t *testing.T) {
-	cronRunner, err := startOrderCompletionCron(nil)
+func TestManagerStartRegistersOneJob(t *testing.T) {
+	manager := NewManager(nil)
+	err := manager.Start()
 	if err != nil {
-		t.Fatalf("startOrderCompletionCron returned error: %v", err)
+		t.Fatalf("Start returned error: %v", err)
 	}
-	defer cronRunner.Stop()
+	defer manager.Stop()
 
-	entries := cronRunner.Entries()
+	entries := manager.cronRunner.Entries()
 	if len(entries) != 1 {
 		t.Fatalf("len(entries) = %d, want 1", len(entries))
 	}

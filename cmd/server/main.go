@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go-fiber/internal/config"
+	"go-fiber/internal/cron"
 	"go-fiber/internal/database"
 	"go-fiber/internal/handlers"
 	"go-fiber/internal/middleware"
@@ -68,11 +69,11 @@ func main() {
 	shippingSvc := services.NewShippingService(shippingConfigRepo, shopRepo)
 	orderService := services.NewOrderService(orderRepo, paymentSvc, customerRepo, productRepo, shippingSvc)
 
-	orderCompletionCron, err := startOrderCompletionCron(orderService)
-	if err != nil {
+	cronManager := cron.NewManager(orderService)
+	if err := cronManager.Start(); err != nil {
 		log.Fatalf("Failed to start order completion cron: %v", err)
 	}
-	defer orderCompletionCron.Stop()
+	defer cronManager.Stop()
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService)
