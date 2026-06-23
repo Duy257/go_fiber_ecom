@@ -51,6 +51,8 @@ Fields:
 
 No soft delete is needed because a wallet is financial state tied to a shop. Deleting wallet state would create audit risk.
 
+Wallets are created lazily — a wallet row is created on first order completion or first withdrawal request if one does not already exist for the shop. The repository provides a `FindOrCreateByShopID` method for this purpose. There is no explicit wallet creation endpoint.
+
 ### ShopWalletLog
 
 Append-only record of every wallet balance movement.
@@ -68,20 +70,26 @@ Fields:
 - `available_after decimal(12,2) not null`
 - `pending_before decimal(12,2) not null`
 - `pending_after decimal(12,2) not null`
+- `withdrawn_before decimal(12,2) not null`
+- `withdrawn_after decimal(12,2) not null`
 - `status varchar(20) not null`
 - `description text`
 - `metadata jsonb`
 - `created_at`
 
-Log types:
+`order_id` is required (not null) for `order_completed_pending` and `pending_released` log types. `withdrawal_request_id` is required for `withdrawal_*` log types.
 
-- `order_completed_pending`: order revenue added to held balance.
-- `pending_released`: held balance moved to withdrawable balance.
-- `withdrawal_hold`: available balance held for a withdrawal request.
-- `withdrawal_approved`: held withdrawal completed and counted as withdrawn.
-- `withdrawal_rejected`: held withdrawal returned to available balance.
+Log types and their status values:
 
-`status` records the result or request state related to the movement. Logs are not updated or deleted by service code.
+| Log type | Status value | Balances affected |
+|---|---|---|
+| `order_completed_pending` | `completed` | pending ↑ |
+| `pending_released` | `completed` | pending ↓, available ↑ |
+| `withdrawal_hold` | `pending` | available ↓ |
+| `withdrawal_approved` | `approved` | withdrawn ↑ |
+| `withdrawal_rejected` | `rejected` | available ↑ |
+
+`status` records the source entity state at the time of the movement. For order-related logs, it records the order status (`completed`). For withdrawal-related logs, it records the withdrawal request status (`pending`/`approved`/`rejected`). Logs are not updated or deleted by service code.
 
 ### ShopWithdrawalRequest
 
@@ -109,6 +117,8 @@ Statuses:
 
 `bank_info` is a snapshot JSON object supplied at request time, for example `bank_name`, `account_number`, `account_holder`, and optional metadata. It is intentionally snapshotted so later bank detail changes do not alter historical withdrawal requests.
 
+Validation: `bank_info` must contain at minimum `bank_name`, `account_number`, and `account_holder`. The service rejects requests with missing required fields as `400 VALIDATION_ERROR`.
+
 ## Wallet Lifecycle
 
 ### Credit Pending Balance
@@ -130,7 +140,7 @@ Idempotency requirement:
 
 ### Release Pending Balance
 
-A wallet release cron moves held funds to withdrawable funds.
+A wallet release cron moves held funds to withdrawable funds. The cron runs at 02:00 daily (same schedule as order auto-completion).
 
 Eligibility:
 
@@ -142,10 +152,11 @@ Eligibility:
 For each eligible order, in a transaction:
 
 1. Lock the wallet row.
-2. Verify `pending_balance >= amount`.
-3. Subtract from `pending_balance`.
-4. Add to `available_balance`.
-5. Insert a `pending_released` log with before/after snapshots.
+2. Look up the `order_completed_pending` log for the order and read its `amount` (this is the revenue originally credited).
+3. Verify `pending_balance >= amount`.
+4. Subtract amount from `pending_balance`.
+5. Add amount to `available_balance`.
+6. Insert a `pending_released` log with before/after snapshots.
 
 If pending balance is insufficient, fail the transaction and report the error. The service must not allow negative balances.
 
@@ -193,6 +204,7 @@ Routes live under `/api/v1/shop` and use JWT auth. They resolve the shop from th
 
 - `GET /api/v1/shop/wallet`
   - Returns `pending_balance`, `available_balance`, `withdrawn_balance`.
+  - If no wallet exists yet (shop has no completed orders), auto-create one with zero balances and return it. Never returns 404 for an existing shop.
 - `GET /api/v1/shop/wallet/logs?page=&limit=&type=`
   - Returns paginated wallet logs for the current shop.
 - `POST /api/v1/shop/withdrawals`
@@ -243,11 +255,11 @@ New files:
 
 Modified files:
 
-- `internal/database/database.go`: add wallet models to `AutoMigrate`.
+- `internal/database/database.go`: add wallet models to `AutoMigrate`. Run migration SQL for existing completed orders (see [Migration](#migration)).
 - `internal/models/order.go`: add `CompletedAt *time.Time`.
-- `internal/repositories/order_repo.go`: support querying wallet-release-eligible completed orders and setting `completed_at` when completing orders.
-- `internal/services/order_service.go`: call wallet service when an order becomes `completed`.
-- `internal/cron`: run both order auto-completion and wallet pending-release jobs.
+- `internal/repositories/order_repo.go`: set `completed_at` when completing orders. Support querying wallet-release-eligible completed orders (status = `completed`, `completed_at <= cutoff`, no `pending_released` log).
+- `internal/services/order_service.go`: inject `ShopWalletService`, call it when an order becomes `completed`.
+- `internal/cron`: accept wallet service dependency, run both order auto-completion and wallet pending-release jobs.
 - `cmd/server/main.go`: wire repository, service, handler, routes, and seed permissions.
 
 ## Error Handling
@@ -261,7 +273,21 @@ Use existing response helpers and error conventions.
 - Withdrawal request already processed: `400 VALIDATION_ERROR`.
 - Unexpected database failure: `500 INTERNAL_ERROR` at handler boundary.
 
-Service code must reject any operation that would make `pending_balance` or `available_balance` negative.
+Service code must reject any operation that would make `pending_balance`, `available_balance`, or `withdrawn_balance` negative.
+
+## Migration
+
+When this feature is deployed to a database with existing completed orders, those orders will have `completed_at = NULL`. The wallet release cron only checks `completed_at <= now - 7 days`, so existing completed orders would never be released.
+
+Run a one-time migration after `AutoMigrate` adds the `completed_at` column:
+
+```sql
+UPDATE orders SET completed_at = updated_at WHERE status = 'completed' AND completed_at IS NULL;
+```
+
+This sets `completed_at` to the order's last update timestamp for all existing completed orders, making them eligible for the release cron after the 7-day window from their original completion time.
+
+Existing completed orders will NOT be credited to `pending_balance` automatically — only orders that transition to `completed` after the feature is deployed trigger the credit. Existing transactions before deployment are considered settled outside this system.
 
 ## Concurrency And Consistency
 
@@ -299,6 +325,7 @@ Service tests:
 - Release cron does not release twice.
 - Creating a withdrawal holds available balance and creates a pending request.
 - Approving a withdrawal increments withdrawn balance and does not subtract available twice.
+- `withdrawal_approved` log captures `withdrawn_before` and `withdrawn_after` correctly.
 - Rejecting a withdrawal returns held amount to available balance.
 - Insufficient funds fails without creating a request or log.
 
