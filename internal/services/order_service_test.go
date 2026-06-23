@@ -181,3 +181,71 @@ func TestUpdateStatusToDeliveredSetsDeliveredAt(t *testing.T) {
 		t.Fatalf("find delivered history: %v", err)
 	}
 }
+
+func TestAutoCompleteDeliveredOrdersBeforeCompletesOnlyEligibleOrders(t *testing.T) {
+	db := newOrderServiceTestDB(t)
+	orderRepo := repositories.NewOrderRepository(db)
+	orderSvc := NewOrderService(orderRepo, nil, nil, nil, nil)
+	now := time.Now().UTC()
+	oldDeliveredAt := now.Add(-8 * 24 * time.Hour)
+	recentDeliveredAt := now.Add(-6 * 24 * time.Hour)
+
+	eligible := createServiceTestOrder(t, db, models.OrderStatusDelivered, &oldDeliveredAt, false)
+	recent := createServiceTestOrder(t, db, models.OrderStatusDelivered, &recentDeliveredAt, false)
+	complained := createServiceTestOrder(t, db, models.OrderStatusDelivered, &oldDeliveredAt, true)
+	alreadyCompleted := createServiceTestOrder(t, db, models.OrderStatusCompleted, &oldDeliveredAt, false)
+
+	completedCount, err := orderSvc.AutoCompleteDeliveredOrdersBefore(now.Add(-7 * 24 * time.Hour))
+	if err != nil {
+		t.Fatalf("AutoCompleteDeliveredOrdersBefore returned error: %v", err)
+	}
+
+	if completedCount != 1 {
+		t.Fatalf("completedCount = %d, want 1", completedCount)
+	}
+
+	assertOrderStatus(t, db, eligible.ID, models.OrderStatusCompleted)
+	assertOrderStatus(t, db, recent.ID, models.OrderStatusDelivered)
+	assertOrderStatus(t, db, complained.ID, models.OrderStatusDelivered)
+	assertOrderStatus(t, db, alreadyCompleted.ID, models.OrderStatusCompleted)
+}
+
+func TestAutoCompleteDeliveredOrdersBeforeWritesHistory(t *testing.T) {
+	db := newOrderServiceTestDB(t)
+	orderRepo := repositories.NewOrderRepository(db)
+	orderSvc := NewOrderService(orderRepo, nil, nil, nil, nil)
+	now := time.Now().UTC()
+	oldDeliveredAt := now.Add(-8 * 24 * time.Hour)
+	order := createServiceTestOrder(t, db, models.OrderStatusDelivered, &oldDeliveredAt, false)
+
+	completedCount, err := orderSvc.AutoCompleteDeliveredOrdersBefore(now.Add(-7 * 24 * time.Hour))
+	if err != nil {
+		t.Fatalf("AutoCompleteDeliveredOrdersBefore returned error: %v", err)
+	}
+
+	if completedCount != 1 {
+		t.Fatalf("completedCount = %d, want 1", completedCount)
+	}
+
+	var history models.OrderStatusHistory
+	if err := db.Where("order_id = ? AND status = ?", order.ID, models.OrderStatusCompleted).First(&history).Error; err != nil {
+		t.Fatalf("find completed history: %v", err)
+	}
+
+	if history.Note != "Auto-completed after 7 days without complaint" {
+		t.Fatalf("history note = %q, want system auto-complete note", history.Note)
+	}
+}
+
+func assertOrderStatus(t *testing.T, db *gorm.DB, orderID uuid.UUID, want string) {
+	t.Helper()
+
+	var order models.Order
+	if err := db.First(&order, "id = ?", orderID).Error; err != nil {
+		t.Fatalf("reload order %s: %v", orderID, err)
+	}
+
+	if order.Status != want {
+		t.Fatalf("order %s status = %q, want %q", orderID, order.Status, want)
+	}
+}

@@ -303,6 +303,48 @@ func (s *OrderService) UpdateStatus(id uuid.UUID, input UpdateOrderStatusInput) 
 	return s.repo.FindByID(order.ID)
 }
 
+func (s *OrderService) AutoCompleteDeliveredOrders() (int, error) {
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	return s.AutoCompleteDeliveredOrdersBefore(cutoff)
+}
+
+func (s *OrderService) AutoCompleteDeliveredOrdersBefore(cutoff time.Time) (int, error) {
+	orders, err := s.repo.FindAutoCompletableDelivered(cutoff)
+	if err != nil {
+		return 0, err
+	}
+
+	completedCount := 0
+	for _, order := range orders {
+		err := s.repo.Transaction(func(tx *gorm.DB) error {
+			rowsAffected, err := s.repo.CompleteDeliveredOrder(tx, order.ID)
+			if err != nil {
+				return err
+			}
+			if rowsAffected == 0 {
+				return nil
+			}
+
+			history := &models.OrderStatusHistory{
+				OrderID: order.ID,
+				Status:  models.OrderStatusCompleted,
+				Note:    "Auto-completed after 7 days without complaint",
+			}
+			if err := tx.Create(history).Error; err != nil {
+				return err
+			}
+
+			completedCount++
+			return nil
+		})
+		if err != nil {
+			return completedCount, err
+		}
+	}
+
+	return completedCount, nil
+}
+
 func (s *OrderService) Cancel(id uuid.UUID, note string) (*models.Order, error) {
 	order, err := s.repo.FindByID(id)
 	if err != nil {
