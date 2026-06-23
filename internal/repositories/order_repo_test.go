@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -21,6 +22,11 @@ func newOrderRepoTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+		os.Remove(dsn)
+	})
 
 	createTableSQL := []string{
 		`CREATE TABLE "orders" (

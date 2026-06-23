@@ -1,6 +1,7 @@
 package services
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -22,6 +23,11 @@ func newOrderServiceTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+		os.Remove(dsn)
+	})
 
 	createTableSQL := []string{
 		`CREATE TABLE "customers" (
