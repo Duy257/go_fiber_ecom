@@ -68,6 +68,12 @@ func main() {
 	shippingSvc := services.NewShippingService(shippingConfigRepo, shopRepo)
 	orderService := services.NewOrderService(orderRepo, paymentSvc, customerRepo, productRepo, shippingSvc)
 
+	orderCompletionCron, err := startOrderCompletionCron(orderService)
+	if err != nil {
+		log.Fatalf("Failed to start order completion cron: %v", err)
+	}
+	defer orderCompletionCron.Stop()
+
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService)
 	customerHandler := handlers.NewCustomerHandler(customerService)
