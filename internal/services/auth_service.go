@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"go-fiber/internal/config"
-	"go-fiber/internal/repositories"
 	"go-fiber/internal/models"
+	"go-fiber/internal/repositories"
 	"go-fiber/internal/utils"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -153,5 +153,3 @@ func (s *AuthService) generateAccessToken(sub, roleType string) (string, error) 
 
 	return token.SignedString([]byte(s.cfg.JWTSecret))
 }
-
-

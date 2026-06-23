@@ -46,11 +46,11 @@ type CreateImageInput struct {
 }
 
 type UpdateProductInput struct {
-	Name        *string             `json:"name"`
-	Description *string             `json:"description"`
-	Price       *float64            `json:"price"`
-	Status      *string             `json:"status"`
-	CategoryIDs []string            `json:"category_ids"`
+	Name        *string              `json:"name"`
+	Description *string              `json:"description"`
+	Price       *float64             `json:"price"`
+	Status      *string              `json:"status"`
+	CategoryIDs []string             `json:"category_ids"`
 	Variants    []CreateVariantInput `json:"variants"`
 	Images      []CreateImageInput   `json:"images"`
 }

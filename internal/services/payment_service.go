@@ -12,12 +12,12 @@ import (
 )
 
 var (
-	ErrInvalidPaymentType    = errors.New("invalid payment type")
-	ErrInvalidPaymentMethod  = errors.New("invalid payment method")
-	ErrInvalidPaymentAmount  = errors.New("payment amount must be greater than 0")
-	ErrOrderIDRequired       = errors.New("order_id is required for order payment type")
-	ErrOrderIDNotAllowed     = errors.New("order_id must be empty for non-order payment type")
-	ErrPaymentNotFound       = errors.New("payment not found")
+	ErrInvalidPaymentType   = errors.New("invalid payment type")
+	ErrInvalidPaymentMethod = errors.New("invalid payment method")
+	ErrInvalidPaymentAmount = errors.New("payment amount must be greater than 0")
+	ErrOrderIDRequired      = errors.New("order_id is required for order payment type")
+	ErrOrderIDNotAllowed    = errors.New("order_id must be empty for non-order payment type")
+	ErrPaymentNotFound      = errors.New("payment not found")
 )
 
 type CreatePaymentInput struct {

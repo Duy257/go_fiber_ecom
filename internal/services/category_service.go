@@ -21,11 +21,11 @@ func NewCategoryService(repo *repositories.CategoryRepository) *CategoryService 
 }
 
 type CreateCategoryInput struct {
-	Name        string `json:"name" validate:"required"`
-	Description string `json:"description"`
-	Image       string `json:"image"`
+	Name        string  `json:"name" validate:"required"`
+	Description string  `json:"description"`
+	Image       string  `json:"image"`
 	ParentID    *string `json:"parent_id"`
-	SortOrder   int    `json:"sort_order"`
+	SortOrder   int     `json:"sort_order"`
 }
 
 type UpdateCategoryInput struct {
