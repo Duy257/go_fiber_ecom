@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"go-fiber/internal/models"
 	"go-fiber/internal/repositories"
@@ -244,9 +245,9 @@ func (s *OrderService) UpdateStatus(id uuid.UUID, input UpdateOrderStatusInput) 
 	}
 
 	validTransitions := map[string][]string{
-		"pending":   {"confirmed", "cancelled"},
-		"confirmed": {"shipping", "cancelled"},
-		"shipping":  {"delivered"},
+		models.OrderStatusPending:   {models.OrderStatusConfirmed, models.OrderStatusCancelled},
+		models.OrderStatusConfirmed: {models.OrderStatusShipping, models.OrderStatusCancelled},
+		models.OrderStatusShipping:  {models.OrderStatusDelivered},
 	}
 
 	allowed, ok := validTransitions[order.Status]
@@ -266,7 +267,14 @@ func (s *OrderService) UpdateStatus(id uuid.UUID, input UpdateOrderStatusInput) 
 	}
 
 	err = s.repo.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.Order{}).Where("id = ?", order.ID).Update("status", input.Status).Error; err != nil {
+		updates := map[string]interface{}{
+			"status": input.Status,
+		}
+		if input.Status == models.OrderStatusDelivered {
+			updates["delivered_at"] = time.Now()
+		}
+
+		if err := tx.Model(&models.Order{}).Where("id = ?", order.ID).Updates(updates).Error; err != nil {
 			return err
 		}
 
@@ -279,7 +287,7 @@ func (s *OrderService) UpdateStatus(id uuid.UUID, input UpdateOrderStatusInput) 
 			return err
 		}
 
-		if input.Status == "delivered" {
+		if input.Status == models.OrderStatusDelivered {
 			if err := s.paymentSvc.MarkAsPaid(tx, order.ID); err != nil {
 				return err
 			}
