@@ -118,9 +118,11 @@ func (s *OrderService) Create(input CreateOrderInput) (*models.Order, error) {
 		}
 
 		orderItem := models.OrderItem{
-			ProductID:   productID,
-			ProductName: product.Name,
-			Quantity:    item.Quantity,
+			ProductID:     productID,
+			ProductName:   product.Name,
+			Quantity:      item.Quantity,
+			DiscountType:  product.DiscountType,
+			DiscountValue: product.DiscountValue,
 		}
 
 		if item.VariantID != "" {
@@ -142,10 +144,15 @@ func (s *OrderService) Create(input CreateOrderInput) (*models.Order, error) {
 
 			orderItem.VariantID = &variantID
 			orderItem.VariantName = variant.Name
-			orderItem.Price = variant.Price
+			orderItem.OriginalPrice = variant.Price
 		} else {
-			orderItem.Price = product.Price
+			orderItem.OriginalPrice = product.Price
 		}
+
+		// Apply product-level discount
+		discountedPrice, discountAmount := CalculateDiscount(orderItem.OriginalPrice, orderItem.DiscountType, orderItem.DiscountValue)
+		orderItem.Price = discountedPrice
+		orderItem.DiscountAmount = discountAmount
 
 		orderItem.Total = orderItem.Price * float64(item.Quantity)
 		subTotal += orderItem.Total

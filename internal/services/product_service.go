@@ -23,13 +23,15 @@ func NewProductService(repo *repositories.ProductRepository, shopRepo *repositor
 }
 
 type CreateProductInput struct {
-	ShopID      string               `json:"shop_id" validate:"required"`
-	Name        string               `json:"name" validate:"required"`
-	Description string               `json:"description"`
-	Price       float64              `json:"price" validate:"required,gt=0"`
-	CategoryIDs []string             `json:"category_ids"`
-	Variants    []CreateVariantInput `json:"variants" validate:"required,min=1"`
-	Images      []CreateImageInput   `json:"images"`
+	ShopID       string               `json:"shop_id" validate:"required"`
+	Name         string               `json:"name" validate:"required"`
+	Description  string               `json:"description"`
+	Price        float64              `json:"price" validate:"required,gt=0"`
+	DiscountType string               `json:"discount_type"`
+	DiscountValue float64             `json:"discount_value"`
+	CategoryIDs  []string             `json:"category_ids"`
+	Variants     []CreateVariantInput `json:"variants" validate:"required,min=1"`
+	Images       []CreateImageInput   `json:"images"`
 }
 
 type CreateVariantInput struct {
@@ -46,16 +48,46 @@ type CreateImageInput struct {
 }
 
 type UpdateProductInput struct {
-	Name        *string              `json:"name"`
-	Description *string              `json:"description"`
-	Price       *float64             `json:"price"`
-	Status      *string              `json:"status"`
-	CategoryIDs []string             `json:"category_ids"`
-	Variants    []CreateVariantInput `json:"variants"`
-	Images      []CreateImageInput   `json:"images"`
+	Name         *string              `json:"name"`
+	Description  *string              `json:"description"`
+	Price        *float64             `json:"price"`
+	DiscountType *string              `json:"discount_type"`
+	DiscountValue *float64            `json:"discount_value"`
+	Status       *string              `json:"status"`
+	CategoryIDs  []string             `json:"category_ids"`
+	Variants     []CreateVariantInput `json:"variants"`
+	Images       []CreateImageInput   `json:"images"`
+}
+
+func validateDiscount(discountType string, discountValue float64) error {
+	if discountType == "" {
+		if discountValue != 0 {
+			return errors.New("discount_type is required when setting discount_value")
+		}
+		return nil
+	}
+
+	switch discountType {
+	case models.ProductDiscountTypePercent:
+		if discountValue < 0 || discountValue > 100 {
+			return errors.New("discount_value must be between 0 and 100 for percent discount")
+		}
+	case models.ProductDiscountTypeFixedAmount:
+		if discountValue < 0 {
+			return errors.New("discount_value must be greater than or equal to 0 for fixed_amount discount")
+		}
+	default:
+		return errors.New("invalid discount_type: must be 'percent' or 'fixed_amount'")
+	}
+
+	return nil
 }
 
 func (s *ProductService) Create(input CreateProductInput) (*models.Product, error) {
+	if err := validateDiscount(input.DiscountType, input.DiscountValue); err != nil {
+		return nil, err
+	}
+
 	shopID, err := uuid.Parse(input.ShopID)
 	if err != nil {
 		return nil, errors.New("invalid shop_id")
@@ -86,16 +118,21 @@ func (s *ProductService) Create(input CreateProductInput) (*models.Product, erro
 	}
 
 	product := &models.Product{
-		ShopID:      shopID,
-		Name:        input.Name,
-		Slug:        slug,
-		Description: input.Description,
-		Price:       input.Price,
-		Status:      "active",
+		ID:           uuid.New(),
+		ShopID:       shopID,
+		Name:         input.Name,
+		Slug:         slug,
+		Description:  input.Description,
+		Price:        input.Price,
+		DiscountType: input.DiscountType,
+		DiscountValue: input.DiscountValue,
+		Status:       "active",
 	}
 
 	for _, v := range input.Variants {
 		variant := models.ProductVariant{
+			ID:         uuid.New(),
+			ProductID:  product.ID,
 			Name:       v.Name,
 			SKU:        v.SKU,
 			Price:      v.Price,
@@ -107,6 +144,8 @@ func (s *ProductService) Create(input CreateProductInput) (*models.Product, erro
 
 	for _, img := range input.Images {
 		image := models.ProductImage{
+			ID:        uuid.New(),
+			ProductID: product.ID,
 			URL:       img.URL,
 			SortOrder: img.SortOrder,
 		}
@@ -140,6 +179,14 @@ func (s *ProductService) GetByID(id uuid.UUID) (*models.Product, error) {
 	return product, nil
 }
 
+func (s *ProductService) GetProductResponse(id uuid.UUID) (*ProductResponse, error) {
+	product, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	return ToProductResponse(product), nil
+}
+
 func (s *ProductService) GetAll(shopID, categoryID *string, page, limit int) ([]models.Product, int64, error) {
 	if page < 1 {
 		page = 1
@@ -165,6 +212,20 @@ func (s *ProductService) GetAll(shopID, categoryID *string, page, limit int) ([]
 	}
 
 	return s.repo.FindAll(sid, cid, page, limit)
+}
+
+func (s *ProductService) GetAllResponses(shopID, categoryID *string, page, limit int) ([]*ProductResponse, int64, error) {
+	products, total, err := s.GetAll(shopID, categoryID, page, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	responses := make([]*ProductResponse, len(products))
+	for i := range products {
+		responses[i] = ToProductResponse(&products[i])
+	}
+
+	return responses, total, nil
 }
 
 func (s *ProductService) Update(id uuid.UUID, input UpdateProductInput) (*models.Product, error) {
@@ -207,6 +268,21 @@ func (s *ProductService) Update(id uuid.UUID, input UpdateProductInput) (*models
 	}
 	if input.Status != nil {
 		product.Status = *input.Status
+	}
+
+	// Apply discount partial updates
+	if input.DiscountType != nil {
+		product.DiscountType = *input.DiscountType
+	}
+	if input.DiscountValue != nil {
+		product.DiscountValue = *input.DiscountValue
+	} else if input.DiscountType != nil {
+		// Only discount_type was sent, keep existing value
+	}
+
+	// Validate the final discount pair after partial update
+	if err := validateDiscount(product.DiscountType, product.DiscountValue); err != nil {
+		return nil, err
 	}
 
 	if input.CategoryIDs != nil {

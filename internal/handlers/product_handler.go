@@ -36,7 +36,8 @@ func (h *ProductHandler) Create(c *fiber.Ctx) error {
 		return utils.Error(c, 400, "VALIDATION_ERROR", err.Error())
 	}
 
-	return utils.Success(c, product, "Product created")
+	resp := services.ToProductResponse(product)
+	return utils.Success(c, resp, "Product created")
 }
 
 func (h *ProductHandler) GetByID(c *fiber.Ctx) error {
@@ -45,12 +46,12 @@ func (h *ProductHandler) GetByID(c *fiber.Ctx) error {
 		return utils.Error(c, 400, "VALIDATION_ERROR", "Invalid ID")
 	}
 
-	product, err := h.service.GetByID(id)
+	resp, err := h.service.GetProductResponse(id)
 	if err != nil {
 		return utils.Error(c, 404, "NOT_FOUND", "Product not found")
 	}
 
-	return utils.Success(c, product, "")
+	return utils.Success(c, resp, "")
 }
 
 func (h *ProductHandler) GetAll(c *fiber.Ctx) error {
@@ -67,7 +68,7 @@ func (h *ProductHandler) GetAll(c *fiber.Ctx) error {
 		cid = &categoryID
 	}
 
-	products, total, err := h.service.GetAll(sid, cid, page, limit)
+	products, total, err := h.service.GetAllResponses(sid, cid, page, limit)
 	if err != nil {
 		return utils.Error(c, 400, "VALIDATION_ERROR", err.Error())
 	}
@@ -91,7 +92,8 @@ func (h *ProductHandler) Update(c *fiber.Ctx) error {
 		return utils.Error(c, 400, "VALIDATION_ERROR", err.Error())
 	}
 
-	return utils.Success(c, product, "Product updated")
+	resp := services.ToProductResponse(product)
+	return utils.Success(c, resp, "Product updated")
 }
 
 func (h *ProductHandler) Delete(c *fiber.Ctx) error {

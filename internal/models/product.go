@@ -7,21 +7,28 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	ProductDiscountTypePercent     = "percent"
+	ProductDiscountTypeFixedAmount = "fixed_amount"
+)
+
 type Product struct {
-	ID          uuid.UUID        `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	ShopID      uuid.UUID        `gorm:"type:uuid;index;not null" json:"shop_id"`
-	Shop        Shop             `gorm:"foreignKey:ShopID" json:"shop,omitempty"`
-	Name        string           `gorm:"type:varchar(255);not null" json:"name"`
-	Slug        string           `gorm:"type:varchar(255);uniqueIndex;not null" json:"slug"`
-	Description string           `gorm:"type:text" json:"description,omitempty"`
-	Images      []ProductImage   `gorm:"foreignKey:ProductID" json:"images,omitempty"`
-	Variants    []ProductVariant `gorm:"foreignKey:ProductID" json:"variants,omitempty"`
-	Categories  []Category       `gorm:"many2many:product_categories;" json:"categories,omitempty"`
-	Price       float64          `gorm:"type:decimal(12,2);not null" json:"price"`
-	Status      string           `gorm:"type:varchar(20);default:active" json:"status"`
-	DeletedAt   gorm.DeletedAt   `gorm:"index" json:"-"`
-	CreatedAt   time.Time        `json:"created_at"`
-	UpdatedAt   time.Time        `json:"updated_at"`
+	ID            uuid.UUID        `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ShopID        uuid.UUID        `gorm:"type:uuid;index;not null" json:"shop_id"`
+	Shop          Shop             `gorm:"foreignKey:ShopID" json:"shop,omitempty"`
+	Name          string           `gorm:"type:varchar(255);not null" json:"name"`
+	Slug          string           `gorm:"type:varchar(255);uniqueIndex;not null" json:"slug"`
+	Description   string           `gorm:"type:text" json:"description,omitempty"`
+	Images        []ProductImage   `gorm:"foreignKey:ProductID" json:"images,omitempty"`
+	Variants      []ProductVariant `gorm:"foreignKey:ProductID" json:"variants,omitempty"`
+	Categories    []Category       `gorm:"many2many:product_categories;" json:"categories,omitempty"`
+	Price         float64          `gorm:"type:decimal(12,2);not null" json:"price"`
+	DiscountType  string           `gorm:"type:varchar(20)" json:"discount_type,omitempty"`
+	DiscountValue float64          `gorm:"type:decimal(12,2);default:0" json:"discount_value"`
+	Status        string           `gorm:"type:varchar(20);default:active" json:"status"`
+	DeletedAt     gorm.DeletedAt   `gorm:"index" json:"-"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
 }
 
 type ProductVariant struct {

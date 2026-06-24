@@ -43,18 +43,22 @@ type Order struct {
 }
 
 type OrderItem struct {
-	ID          uuid.UUID       `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	OrderID     uuid.UUID       `gorm:"type:uuid;index;not null" json:"order_id"`
-	Order       Order           `gorm:"foreignKey:OrderID" json:"-"`
-	ProductID   uuid.UUID       `gorm:"type:uuid;not null" json:"product_id"`
-	Product     Product         `gorm:"foreignKey:ProductID" json:"product,omitempty"`
-	VariantID   *uuid.UUID      `gorm:"type:uuid" json:"variant_id,omitempty"`
-	Variant     *ProductVariant `gorm:"foreignKey:VariantID" json:"variant,omitempty"`
-	ProductName string          `gorm:"type:varchar(255);not null" json:"product_name"`
-	VariantName string          `gorm:"type:varchar(255)" json:"variant_name,omitempty"`
-	Price       float64         `gorm:"type:decimal(12,2);not null" json:"price"`
-	Quantity    int             `gorm:"not null" json:"quantity"`
-	Total       float64         `gorm:"type:decimal(12,2);not null" json:"total"`
+	ID             uuid.UUID       `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	OrderID        uuid.UUID       `gorm:"type:uuid;index;not null" json:"order_id"`
+	Order          Order           `gorm:"foreignKey:OrderID" json:"-"`
+	ProductID      uuid.UUID       `gorm:"type:uuid;not null" json:"product_id"`
+	Product        Product         `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+	VariantID      *uuid.UUID      `gorm:"type:uuid" json:"variant_id,omitempty"`
+	Variant        *ProductVariant `gorm:"foreignKey:VariantID" json:"variant,omitempty"`
+	ProductName    string          `gorm:"type:varchar(255);not null" json:"product_name"`
+	VariantName    string          `gorm:"type:varchar(255)" json:"variant_name,omitempty"`
+	OriginalPrice  float64         `gorm:"type:decimal(12,2);not null;default:0" json:"original_price"`
+	Price          float64         `gorm:"type:decimal(12,2);not null" json:"price"`
+	DiscountType   string          `gorm:"type:varchar(20)" json:"discount_type,omitempty"`
+	DiscountValue  float64         `gorm:"type:decimal(12,2);default:0" json:"discount_value"`
+	DiscountAmount float64         `gorm:"type:decimal(12,2);default:0" json:"discount_amount"`
+	Quantity       int             `gorm:"not null" json:"quantity"`
+	Total          float64         `gorm:"type:decimal(12,2);not null" json:"total"`
 }
 
 type OrderStatusHistory struct {
