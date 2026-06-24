@@ -17,6 +17,8 @@ Order creation currently copies the selected product or variant price into `Orde
 
 The project uses GORM `AutoMigrate`, so the discount change should be additive and safe for existing rows.
 
+Product handlers currently return model values directly. This feature should introduce product response DTOs for computed discount fields instead of persisting derived values or adding ignored GORM fields to the model.
+
 ## Scope
 
 In scope:
@@ -47,6 +49,15 @@ Add these fields to `models.Product`:
 ```go
 DiscountType  string  `gorm:"type:varchar(20)" json:"discount_type,omitempty"`
 DiscountValue float64 `gorm:"type:decimal(12,2);default:0" json:"discount_value"`
+```
+
+Define discount type constants in the model package so validation and order calculation do not depend on repeated string literals:
+
+```go
+const (
+	ProductDiscountTypePercent     = "percent"
+	ProductDiscountTypeFixedAmount = "fixed_amount"
+)
 ```
 
 Valid values:
@@ -82,9 +93,10 @@ The calculation should be centralized in the service layer so product responses 
 Rules:
 
 - No discount: `discounted_price = original_price`, `discount_amount = 0`.
-- Percent: `discount_amount = original_price * discount_value / 100`.
-- Fixed amount: `discount_amount = discount_value`.
-- Clamp final price at zero: if the discount is larger than the original price, `discounted_price = 0` and `discount_amount = original_price`.
+- Percent raw discount: `original_price * discount_value / 100`.
+- Fixed amount raw discount: `discount_value`.
+- Actual `discount_amount`: the smaller value between the raw discount and `original_price`.
+- `discounted_price = original_price - discount_amount`.
 
 The clamp rule applies to both product base price and variant prices.
 
@@ -99,6 +111,13 @@ Product create and update inputs should accept optional discount fields:
 }
 ```
 
+Input shape:
+
+- `CreateProductInput.DiscountType` can be a string because an omitted value and an empty string both mean no discount.
+- `CreateProductInput.DiscountValue` can be a float because an omitted value should default to `0`.
+- `UpdateProductInput.DiscountType` should be `*string`.
+- `UpdateProductInput.DiscountValue` should be `*float64` so the service can distinguish omitted value from an explicit `0` used to clear or change a discount.
+
 Validation rules:
 
 - Empty discount is valid only when `discount_value` is `0`.
@@ -112,6 +131,7 @@ Update behavior:
 - Sending `discount_type: ""` with `discount_value: 0` clears the discount.
 - Sending only `discount_type` reuses the existing `discount_value`.
 - Sending only `discount_value` requires the product to already have a `discount_type`; otherwise the update returns a validation error.
+- After applying a partial update to the existing product values, validate the final `discount_type` and `discount_value` pair using the same rules as create.
 
 Product list and detail responses should include raw and computed values:
 
@@ -132,7 +152,7 @@ Product list and detail responses should include raw and computed values:
 }
 ```
 
-Computed fields can be represented with response DTOs instead of persisted model fields to avoid storing derived data.
+Computed fields must be represented with response DTOs instead of persisted model fields to avoid storing derived data. The service should map `models.Product` and `models.ProductVariant` to response structs before returning to handlers.
 
 ## Order Flow
 
@@ -148,6 +168,8 @@ During order creation:
 8. Compute `Order.SubTotal` from discounted item totals.
 9. Compute `Order.TotalAmount = SubTotal + ShippingFee`.
 10. Create payment using the discounted `Order.TotalAmount`.
+
+When there is no active discount, new order items should still set `OriginalPrice` to the selected product or variant price and set `DiscountAmount` to `0`. This keeps new order audit data complete even when no discount applies.
 
 Existing orders are unaffected. For historical rows, `OriginalPrice` will default to `0` unless backfilled. Since existing rows already have `Price`, read paths should treat `OriginalPrice = 0` as legacy data rather than recalculating old discounts.
 
@@ -170,7 +192,10 @@ Product service tests:
 - Reject unknown discount type.
 - Reject percent value greater than `100`.
 - Reject discount value without discount type for a product that does not already have one.
+- Allow update with explicit `discount_value: 0` when clearing discount through pointer input.
+- Validate the final discount pair after partial update.
 - Return computed product and variant `discounted_price` and `discount_amount`.
+- Keep no-discount responses consistent: `discounted_price` equals `price` and `discount_amount` equals `0`.
 
 Order service tests:
 
@@ -199,3 +224,5 @@ GORM `AutoMigrate` should add the new columns:
 No new tables are required.
 
 Existing product rows default to no discount. Existing order rows keep their current `price` and `total`; their new audit fields are legacy defaults.
+
+Do not backfill existing order audit fields as part of this feature. Historical order totals should remain exactly as stored.
